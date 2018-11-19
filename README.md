@@ -43,22 +43,26 @@ Wraps module into an ewasm-compatible constructor. It has two presets:
 - `memory`: wrap the module as a pre-defined memory section
 - `customsection`: include the module as a custom section
 
-## CLI (WIP)
+## CLI
 
-`wasm-chisel` is available as a command line tool.
+`chisel` is available as a command line tool.
 
-It uses features implemented in the library as well in [wasm-gc] and [wasm-utils]. It comes with a configuration file `chisel.yaml`.
+It uses features implemented in the library as well in [wasm-gc] and [wasm-utils]. It comes with a configuration file `chisel.yml`.
 
-## Configuration file (WIP)
+`chisel` searches for `chisel.yml` in the current directory, if not specified otherwise using the flag `-c`.
+
+The only subcommand available at the moment is `chisel run`, which runs non-interactively according the the configuration file.
+
+## Configuration file
 
 The configuration file starts with a ruleset entry, where the name can be anything. Inside the ruleset are its options.
+It is important to note that the configuration parsing will not work if all the rules are prepended with a hyphen. Please avoid this until the configuration parser is generalized.
 
 ```yaml
 ewasm:
-  - file: "target/wasm32-unknown-unknown/release/sentinel.wasm"
-  - remapimports:
-    - style: ewasm
-  - deployer
+  file: "target/wasm32-unknown-unknown/release/sentinel.wasm"
+  remapimports:
+    preset: "ewasm"
 ```
 
 ## sentinel.rs
