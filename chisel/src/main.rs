@@ -46,6 +46,23 @@ struct ModuleContext {
     preset: Option<String>,
 }
 
+/// Helper to get a filename from a config mapping. Assumes that the Value is a Mapping.
+fn get_filename(yaml: &Value) -> Result<String, &'static str> {
+    if let Some(path) = yaml
+        .as_mapping()
+        .unwrap()
+        .get(&Value::String(String::from("file")))
+    {
+        if path.is_string() {
+            Ok(String::from(path.as_str().unwrap().clone()))
+        } else {
+            Err(ERR_INPUT_FILE_TYPE_MISMATCH)
+        }
+    } else {
+        Err(ERR_CONFIG_MISSING_FILE)
+    }
+}
+
 impl ChiselContext {
     fn from_ruleset(ruleset: &Value) -> Result<Self, &'static str> {
         if let Value::Mapping(rules) = ruleset {
@@ -58,21 +75,8 @@ impl ChiselContext {
                     (Value::String(_s), Value::Mapping(_m)) => true,
                     _ => false,
                 }) {
-                // First, look for the 'file' entry.
-                if let Some(path) = config
-                    .as_mapping()
-                    .unwrap()
-                    .get(&Value::String(String::from("file")))
-                {
-                    if let Some(path_raw) = path.as_str() {
-                        filepath = path_raw.to_string();
-                    } else {
-                        return Err(ERR_INPUT_FILE_TYPE_MISMATCH);
-                    }
-                    println!("Using file: {}", filepath);
-                } else {
-                    return Err(ERR_CONFIG_MISSING_FILE);
-                }
+                // First, set the filename.
+                filepath = get_filename(config)?;
 
                 // Parse all valid module entries. Unwrap is ok here because we
                 // established earlier that config is a Mapping.
@@ -112,7 +116,13 @@ impl ModuleContext {
             (Value::String(name), Value::Mapping(flags)) => Ok(ModuleContext {
                 module_name: name.clone(),
                 preset: if let Some(pset) = flags.get(&Value::String(String::from("preset"))) {
-                    Some(String::from(pset.as_str().unwrap())) // We can safely unwrap here because we know it is a string.
+                    // Check that the value to which "preset" resolves is a String. If not, return an
+                    // error
+                    if pset.is_string() {
+                        Some(String::from(pset.as_str().unwrap()))
+                    } else {
+                        return Err(ERR_PRESET_TYPE_MISMATCH);
+                    }
                 } else {
                     None
                 },
