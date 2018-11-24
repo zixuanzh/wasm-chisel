@@ -161,26 +161,23 @@ fn execute_module(context: &ModuleContext, module: &Module) -> bool {
     let name = conf_name.as_str();
     match name {
         "verifyexports" => {
-            let chisel = VerifyExports::with_preset(preset.as_str()).unwrap_or(VerifyExports::with_preset("ewasm").unwrap());
-            let ret = chisel.validate(module).unwrap_or(false);
-            println!("{}: {}", name, if ret { "GOOD" } else { "MALFORMED" });
-            ret
-/*            if let Ok(chisel) = VerifyExports::with_preset(preset) {
+            if let Ok(chisel) = VerifyExports::with_preset(&preset) {
                 chisel.validate(module).unwrap_or(false)
             } else {
                 false
-            } */ //NOTE: this is for the new api
+            }
         },
-/*        "verifyimports" => { // NOTE: Not merged yet as of 11/20
-            if let Ok(chisel) = VerifyExports::with_preset(preset) {
+        "verifyimports" => {
+            if let Ok(chisel) = VerifyExports::with_preset(&preset) {
                 chisel.validate(module).unwrap_or(false)
-            } 
-        } */
+            } else {
+                false
+            }
+        },
         "checkstartfunc" => {
-            //FIXME: checkstartfunc takes a bool for configuration. false by default for now.
+            //NOTE: checkstartfunc takes a bool for configuration. false by default for now.
             let chisel = CheckStartFunc::new(false);
             let ret = chisel.validate(module).unwrap_or(false);
-            println!("{}: {}", name, if ret { "GOOD" } else { "MALFORMED" });
             ret
         }, /*
         "deployer" => 
@@ -194,7 +191,6 @@ fn execute_module(context: &ModuleContext, module: &Module) -> bool {
 fn chisel_execute(context: &ChiselContext) -> Result<bool, &'static str> {
     if let Ok(buffer) = read(context.file()) {
         if let Ok(module) = deserialize_buffer::<Module>(&buffer) {
-            println!("========== RESULTS ==========");
             let chisel_results = context
                 .get_modules()
                 .iter()
