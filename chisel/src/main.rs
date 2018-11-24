@@ -82,26 +82,7 @@ impl ChiselContext {
                 let mut config_itr = config_clone.iter();
                 // Read modules while there are still modules left.
                 while let Some(module) = config_itr.next() {
-                    if let (Value::String(mod_name), Value::Mapping(mod_config)) = module {
-                        let mod_pre = if let Some(p) =
-                            mod_config.get(&Value::String(String::from("preset")))
-                        {
-                            if !p.is_string() {
-                                return Err(ERR_PRESET_TYPE_MISMATCH);
-                            }
-                            Some(String::from(p.as_str().unwrap()))
-                        } else {
-                            None
-                        };
-                        println!(
-                            "Loaded module '{}' with preset '{}'",
-                            mod_name,
-                            mod_pre.clone().unwrap_or("None".to_string())
-                        );
-                        module_confs.push(ModuleContext::with_fields(mod_name.clone(), mod_pre));
-                    } else {
-                        return Err(ERR_MODULE_TYPE_MISMATCH);
-                    }
+                    module_confs.push(ModuleContext::from_yaml(module)?);
                 }
             } else {
                 return Err(ERR_CONFIG_INVALID);
@@ -126,6 +107,20 @@ impl ChiselContext {
 }
 
 impl ModuleContext {
+    fn from_yaml(yaml: (&Value, &Value)) -> Result<Self, &'static str> {
+        match yaml {
+            (Value::String(name), Value::Mapping(flags)) => Ok(ModuleContext {
+                module_name: name.clone(),
+                preset: if let Some(pset) = flags.get(&Value::String(String::from("preset"))) {
+                    Some(String::from(pset.as_str().unwrap())) // We can safely unwrap here because we know it is a string.
+                } else {
+                    None
+                },
+            }),
+            _ => Err(ERR_MODULE_TYPE_MISMATCH),
+        }
+    }
+
     fn with_fields(module: String, pre: Option<String>) -> Self {
         ModuleContext {
             module_name: module,
