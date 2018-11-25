@@ -233,7 +233,6 @@ fn chisel_subcommand_run(args: &ArgMatches) -> i32 {
 pub fn main() {
     let cli_matches = App::new("chisel")
         .version(crate_version!())
-        .author(crate_authors!())
         .about(crate_description!())
         .subcommand(
             SubCommand::with_name("run")
