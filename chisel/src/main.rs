@@ -11,7 +11,7 @@ use std::env;
 use std::fs::{read, read_to_string};
 use std::process;
 
-use libchisel::{checkstartfunc::*, verifyexports::*};
+use libchisel::{checkstartfunc::*, verifyexports::*, verifyimports::*};
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use libchisel::*;
@@ -164,7 +164,7 @@ fn execute_module(context: &ModuleContext, module: &Module) -> bool {
         .to_string();
 
     let name = conf_name.as_str();
-    match name {
+    let ret = match name {
         "verifyexports" => {
             if let Ok(chisel) = VerifyExports::with_preset(&preset) {
                 chisel.validate(module).unwrap_or(false)
@@ -173,7 +173,7 @@ fn execute_module(context: &ModuleContext, module: &Module) -> bool {
             }
         },
         "verifyimports" => {
-            if let Ok(chisel) = VerifyExports::with_preset(&preset) {
+            if let Ok(chisel) = VerifyImports::with_preset(&preset) {
                 chisel.validate(module).unwrap_or(false)
             } else {
                 false
@@ -190,12 +190,16 @@ fn execute_module(context: &ModuleContext, module: &Module) -> bool {
         "remapimports"
         */
         _ => false,
-    }
+    };
+
+    println!("{}: {}", name, if ret { "GOOD" } else { "BAD" });
+    ret
 }
 
 fn chisel_execute(context: &ChiselContext) -> Result<bool, &'static str> {
     if let Ok(buffer) = read(context.file()) {
         if let Ok(module) = deserialize_buffer::<Module>(&buffer) {
+            println!("========== RESULTS ==========");
             let chisel_results = context
                 .get_modules()
                 .iter()
