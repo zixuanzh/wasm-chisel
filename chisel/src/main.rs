@@ -11,11 +11,11 @@ use std::env;
 use std::fs::{read, read_to_string};
 use std::process;
 
-use libchisel::{checkstartfunc::*, verifyexports::*, verifyimports::*};
+use libchisel::{checkstartfunc::*, verifyexports::*, deployer::*, verifyimports::*};
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use libchisel::*;
-use parity_wasm::elements::{deserialize_buffer, Module};
+use parity_wasm::elements::{deserialize_buffer, Module, serialize};
 use serde_yaml::{from_str, Value};
 
 // Error messages
@@ -27,10 +27,11 @@ static ERR_CONFIG_INVALID: &'static str = "Config is invalid.";
 static ERR_CONFIG_MISSING_FILE: &'static str = "Config missing file path to chisel.";
 static ERR_INPUT_FILE_TYPE_MISMATCH: &'static str = "Entry 'file' does not map to a string.";
 static ERR_MODULE_TYPE_MISMATCH: &'static str =
-    "An entry 'module' does not point to a key-value map.";
+    "A module configuration does not point to a key-value map. Perhaps an option field is missing?";
 static ERR_PRESET_TYPE_MISMATCH: &'static str =
     "A field 'preset' belonging to a module is not a string";
 static ERR_DESERIALIZE_MODULE: &'static str = "Failed to deserialize the wasm binary.";
+static ERR_MISSING_PRESET: &'static str = "Module configuration missing preset.";
 
 // Other constants
 static DEFAULT_CONFIG_PATH: &'static str = "chisel.yml";
@@ -38,16 +39,17 @@ static DEFAULT_CONFIG_PATH: &'static str = "chisel.yml";
 /// Chisel configuration structure. Contains a file to chisel and a list of modules configurations.
 struct ChiselContext {
     file: String,
+    outfile: Option<String>, // Output file. If a ModuleTranslator or ModuleCreator is invoked, resorts to a default.
     modules: Vec<ModuleContext>,
 }
 
 struct ModuleContext {
     module_name: String,
-    preset: Option<String>,
+    preset: String,
 }
 
-/// Helper to get a filename from a config mapping. Assumes that the Value is a Mapping.
-fn get_filename(yaml: &Value) -> Result<String, &'static str> {
+/// Helper to get a field from a config mapping. Assumes that the Value is a Mapping.
+fn get_field(yaml: &Value, key: &str) -> Result<String, &'static str> {
     if let Some(path) = yaml
         .as_mapping()
         .unwrap()
@@ -67,6 +69,7 @@ impl ChiselContext {
     fn from_ruleset(ruleset: &Value) -> Result<Self, &'static str> {
         if let Value::Mapping(rules) = ruleset {
             let mut filepath = String::new();
+            let mut outfilepath = Some(String::new());
             let mut module_confs: Vec<ModuleContext> = vec![];
             // If we have more than one ruleset, only use the first valid one.
             // TODO: allow selecting a ruleset
@@ -76,7 +79,13 @@ impl ChiselContext {
                     _ => false,
                 }) {
                 // First, set the filename.
-                filepath = get_filename(config)?;
+                filepath = get_field(config, "file")?;
+
+                outfilepath = if let Ok(out) = get_field(config, "output") {
+                    Some(out)
+                } else {
+                    None
+                };
 
                 // Parse all valid module entries. Unwrap is ok here because we
                 // established earlier that config is a Mapping.
@@ -94,6 +103,7 @@ impl ChiselContext {
 
             Ok(ChiselContext {
                 file: filepath,
+                outfile: outfilepath,
                 modules: module_confs,
             })
         } else {
@@ -119,26 +129,26 @@ impl ModuleContext {
                     // Check that the value to which "preset" resolves is a String. If not, return an
                     // error
                     if pset.is_string() {
-                        Some(String::from(pset.as_str().unwrap()))
+                        String::from(pset.as_str().unwrap())
                     } else {
                         return Err(ERR_PRESET_TYPE_MISMATCH);
                     }
                 } else {
-                    None
+                    return Err(ERR_MISSING_PRESET);
                 },
             }),
             _ => Err(ERR_MODULE_TYPE_MISMATCH),
         }
     }
 
-    fn with_fields(module: String, pre: Option<String>) -> Self {
+    fn with_fields(module: String, pre: String) -> Self {
         ModuleContext {
             module_name: module,
             preset: pre,
         }
     }
 
-    fn fields(&self) -> (&String, &Option<String>) {
+    fn fields(&self) -> (&String, &String) {
         (&self.module_name, &self.preset)
     }
 }
@@ -156,54 +166,72 @@ fn yaml_configure(yaml: String) -> Result<ChiselContext, &'static str> {
     }
 }
 
-fn execute_module(context: &ModuleContext, module: &Module) -> bool {
+fn execute_module(context: &ModuleContext, module: &mut Module) -> bool {
     let (conf_name, conf_preset) = context.fields();
     let preset = conf_preset
-        .clone()
-        .unwrap_or(String::from("ewasm"))
-        .to_string();
+        .clone();
 
     let name = conf_name.as_str();
     let ret = match name {
         "verifyexports" => {
             if let Ok(chisel) = VerifyExports::with_preset(&preset) {
-                chisel.validate(module).unwrap_or(false)
+                Ok(chisel.validate(module).unwrap_or(false))
             } else {
-                false
+                Ok(false)
             }
         },
         "verifyimports" => {
             if let Ok(chisel) = VerifyImports::with_preset(&preset) {
-                chisel.validate(module).unwrap_or(false)
+                Ok(chisel.validate(module).unwrap_or(false))
             } else {
-                false
+                Ok(false)
             }
         },
         "checkstartfunc" => {
             //NOTE: checkstartfunc takes a bool for configuration. false by default for now.
             let chisel = CheckStartFunc::new(false);
             let ret = chisel.validate(module).unwrap_or(false);
-            ret
-        }, /*
-        "deployer" => 
-        "trimexports"
+            Ok(ret)
+        }, 
+    /*    "deployer" =>  {
+            let payload = serialize(module.clone()).unwrap(); // TODO: handle serialization failure
+            let chisel = Deployer::with_preset(&preset, &payload).unwrap();
+            let new_module = chisel.create().unwrap();
+            module = &mut new_module.clone();
+            Ok(true)
+        }, */
+        /* "trimexports" 
         "remapimports"
         */
-        _ => false,
+        _ => Err("Module Not Found"),
     };
-
-    println!("{}: {}", name, if ret { "GOOD" } else { "BAD" });
-    ret
+    
+    let module_status_msg = if let Ok(result) = ret {
+        if result {
+            "Good"
+        } else {
+            "Bad"
+        }
+    } else {
+        "Configuration not found" // Not needed yet, just placed here in case the configuration structure changes.
+    };
+    println!("{}: {}", name, module_status_msg);
+    
+    if let Ok(result) = ret {
+        result
+    } else {
+        false
+    }
 }
 
 fn chisel_execute(context: &ChiselContext) -> Result<bool, &'static str> {
     if let Ok(buffer) = read(context.file()) {
-        if let Ok(module) = deserialize_buffer::<Module>(&buffer) {
+        if let Ok(mut module) = deserialize_buffer::<Module>(&buffer) {
             println!("========== RESULTS ==========");
             let chisel_results = context
                 .get_modules()
                 .iter()
-                .map(|ctx| execute_module(ctx, &module))
+                .map(|ctx| execute_module(ctx, &mut module))
                 .fold(true, |b, e| e & b);
             Ok(chisel_results)
         } else {
